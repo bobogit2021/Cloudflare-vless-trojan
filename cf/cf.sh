@@ -1,38 +1,23 @@
 #!/bin/bash
 export LANG=en_US.UTF-8
 
-# 1. 架构检测
-case "$(uname -m)" in
-	x86_64 | x64 | amd64 ) cpu=amd64 ;;
-	i386 | i686 ) cpu=386 ;;
-	armv8 | armv8l | arm64 | aarch64 ) cpu=arm64 ;;
-	armv7l ) cpu=arm ;;
-	* ) echo "暂不支持当前架构"; exit ;;
-esac
-
-# 2. 注入目标地区特定 IP 段 (核心改进：解决库里没人的问题)
-# 这些网段涵盖了 Cloudflare 在亚太地区最活跃的 Anycast 节点
-generate_ip_list() {
+# 1. 生成移动专供 IP 库 (包含 IPv4 冷门段和 IPv6 亚太全量段)
+generate_ip_lists() {
+    # IPv4：加入了一些容易跳出非香港节点的冷门 CMI 网段
     cat > ips-v4.txt << EOF
 1.0.0.0/24
-1.1.1.0/24
-103.21.244.0/22
-103.22.200.0/22
-104.16.0.0/12
-108.162.192.0/18
-141.101.64.0/18
-162.158.0.0/15
-172.64.0.0/13
 188.114.96.0/20
+141.101.64.0/18
+104.16.0.0/13
+172.64.0.0/13
+103.21.244.0/22
 190.93.240.0/20
-197.234.240.0/22
-198.41.128.0/17
 EOF
-    # IPV6 段（如果需要）
+
+    # IPv6：移动线路在 IPv6 下极易直连新加坡、日本和韩国
     cat > ips-v6.txt << EOF
 2400:cb00::/32
 2606:4700::/32
-2803:f800::/32
 2405:b500::/32
 2405:8100::/32
 2a06:98c0::/29
@@ -40,76 +25,67 @@ EOF
 EOF
 }
 
-# 3. 结果分类筛选函数 (核心改进：确保不被香港 IP 霸榜)
+# 2. 深度分类函数 (针对你要求的四个地区 + 香港/美国)
 result(){
-    echo "正在分类整理各地区节点..."
-    # 新加坡
-    awk -F ',' '$2 ~ /SIN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > SG-$ip.csv
-    # 韩国
-    awk -F ',' '$2 ~ /ICN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > KR-$ip.csv
-    # 泰国
-    awk -F ',' '$2 ~ /BKK/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > TH-$ip.csv
-    # 澳大利亚
-    awk -F ',' '$2 ~ /SYD|MEL|BNE|ADL|PER/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > AU-$ip.csv
-    # 美国
-    awk -F ',' '$2 ~ /LAX|SFO|SJC|SEA|PHX|ORD|EWR|IAD/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > US-$ip.csv
-    # 香港 (作为备选)
-    awk -F ',' '$2 ~ /HKG/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > HK-$ip.csv
+    # 定义分类列表：新加坡、韩国(含日本)、泰国、澳大利亚、美国、香港
+    echo "正在对 $1 结果进行深度分类..."
+    awk -F ',' '$2 ~ /SIN/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > SG-$1.csv
+    awk -F ',' '$2 ~ /ICN|NRT|HND|KIX/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > KRJP-$1.csv
+    awk -F ',' '$2 ~ /BKK/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > TH-$1.csv
+    awk -F ',' '$2 ~ /SYD|MEL|BNE|ADL|PER/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > AU-$1.csv
+    awk -F ',' '$2 ~ /HKG/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > HK-$1.csv
+    awk -F ',' '$2 ~ /LAX|SFO|SJC|SEA|ORD|EWR|IAD/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > US-$1.csv
 }
 
-# 4. 环境准备
-if [ ! -e cf ]; then
-    echo "下载测速工具..."
-    curl -L -o cf -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/$cpu
-    chmod +x cf
-fi
+# 3. 结果展示函数
+show_result() {
+    type=$1
+    echo "================ $type 优选结果汇总 ================"
+    for region in "SG:🇸🇬 新加坡" "KRJP:🇰🇷🇯🇵 韩日" "TH:🇹🇭 泰国" "AU:🇦🇺 澳大利亚" "HK:🇭🇰 香港" "US:🇺🇸 美国"
+    do
+        code=${region%%:*}
+        name=${region#*:}
+        file="$code-$type.csv"
+        echo "[$name]"
+        if [ -s "$file" ]; then
+            cat "$file"
+        else
+            echo "未发现直连节点 (此线路该地区可能绕路)"
+        fi
+        echo "------------------------------------------------"
+    done
+}
 
-if [ ! -e locations.json ]; then
-    curl -s -o locations.json https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/locations.json
-fi
-
-# 5. 主菜单
-echo "------------------------------------------------"
-echo "Cloudflare 多地区优选脚本 (抽样加速版)"
-echo "目标地区：新加坡、韩国、泰国、澳大利亚"
-echo "------------------------------------------------"
-echo "1、IPV4 优选"
-echo "2、IPV6 优选"
-echo "3、重置并退出"
-read -p "请选择 [1-3]: " menu
-
-if [ "$menu" = "1" ]; then
-    ip=4
-    generate_ip_list
-    echo "开始快速抽样扫描 (预计 2-5 分钟)..."
-    # -n 500 表示只取 500 个样本测速，防止时间过长
-    ./cf -ips 4 -outfile 4.csv -n 500 -t 10
-    result
-elif [ "$menu" = "2" ]; then
-    ip=6
-    generate_ip_list
-    ./cf -ips 6 -outfile 6.csv -n 500 -t 10
-    result
-elif [ "$menu" = "3" ]; then
-    rm -rf *.csv locations.json ips-v4.txt ips-v6.txt cf
-    exit
-else
-    exit
-fi
-
-# 6. 输出结果展示
+# 4. 主程序执行逻辑
 clear
-echo "================ 优选结果展示 ================"
-for region in "SG:🇸🇬 新加坡" "KR:🇰🇷 韩国" "TH:🇹🇭 泰国" "AU:🇦🇺 澳大利亚" "HK:🇭🇰 香港" "US:🇺🇸 美国"
-do
-    code=${region%%:*}
-    name=${region#*:}
-    echo "[$name]"
-    file="$code-$ip.csv"
-    if [ -s "$file" ]; then
-        cat "$file"
-    else
-        echo "未发现该地区有效节点 (可能被运营商劫持路由)"
-    fi
-    echo "----------------------------------------------"
-done
+echo "正在检测环境..."
+generate_ip_lists
+
+# 探测 IPv6 是否可用
+if ping6 -c 1 2400:3200::1 &> /dev/null; then
+    ipv6_ready=true
+    echo "检测到 IPv6 环境可用。"
+else
+    ipv6_ready=false
+    echo "未检测到 IPv6 环境，将仅优选 IPv4。"
+fi
+
+# 开始优选 IPv4
+echo "正在优选 IPv4 (样本量 800)..."
+./cf -ips 4 -outfile 4.csv -n 800 -task 100
+result 4
+
+# 如果有 IPv6，开始优选 IPv6
+if [ "$ipv6_ready" = true ]; then
+    echo "正在优选 IPv6 (样本量 800)..."
+    ./cf -ips 6 -outfile 6.csv -n 800 -task 100
+    result 6
+fi
+
+# 5. 打印最终报告
+clear
+show_result 4
+if [ "$ipv6_ready" = true ]; then
+    show_result 6
+fi
+
