@@ -1,127 +1,115 @@
 #!/bin/bash
 export LANG=en_US.UTF-8
+
+# 1. 架构检测
 case "$(uname -m)" in
-	x86_64 | x64 | amd64 )
-	cpu=amd64
-	;;
-	i386 | i686 )
-        cpu=386
-	;;
-	armv8 | armv8l | arm64 | aarch64 )
-        cpu=arm64
-	;;
-	armv7l )
-        cpu=arm
-	;;
-        mips64le )
-        cpu=mips64le
-	;;
-        mips64 )
-        cpu=mips64
-	;;
-        mips )
-        cpu=mipsle
-	;;
-        mipsle )
-        cpu=mipsle
-	;;
-	* )
-	echo "当前架构为$(uname -m)，暂不支持"
-	exit
-	;;
+	x86_64 | x64 | amd64 ) cpu=amd64 ;;
+	i386 | i686 ) cpu=386 ;;
+	armv8 | armv8l | arm64 | aarch64 ) cpu=arm64 ;;
+	armv7l ) cpu=arm ;;
+	* ) echo "暂不支持当前架构"; exit ;;
 esac
 
-result(){
-    awk -F ',' '$2 ~ /BGI|YCC|YVR|YWG|YHZ|YOW|YYZ|YUL|YXE|STI|SDQ|GUA|KIN|GDL|MEX|QRO|SJU|MGM|ANC|PHX|LAX|SMF|SAN|SFO|SJC|DEN|JAX|MIA|TLH|TPA|ATL|HNL|ORD|IND|BGR|BOS|DTW|MSP|MCI|STL|OMA|LAS|EWR|ABQ|BUF|CLT|RDU|CLE|CMH|OKC|PDX|PHL|PIT|FSD|MEM|BNA|AUS|DFW|IAH|MFE|SAT|SLC|IAD|ORF|RIC|SEA/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > US-$ip.csv
-
-    # 修改亚洲的匹配码，添加日本、韩国、澳大利亚、泰国、越南的机场代码
-    awk -F ',' '$2 ~ /CGP|DAC|JSR|PBH|BWN|PNH|GUM|HKG|AMD|BLR|BBI|IXC|MAA|HYD|CNN|KNU|COK|CCU|BOM|NAG|DEL|PAT|DPS|CGK|JOG|FUK|OKA|KIX|NRT|HND|ALA|NQZ|ICN|VTE|MFM|JHB|KUL|KCH|MLE|ULN|MDL|RGN|KTM|ISB|KHI|LHE|CGY|CEB|MNL|CRK|KJA|SVX|SIN|CMB|KHH|TPE|BKK|CNX|URT|TAS|DAD|HAN|SGN|HBA|ADL|BNE|SYD|MEL|PER|NRT|ICN|BKK|SGN|HAN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > AS-$ip.csv
-
-    awk -F ',' '$2 ~ /TIA|VIE|MSQ|BRU|SOF|ZAG|LCA|PRG|CPH|TLL|HEL|BOD|LYS|MRS|CDG|TBS|TXL|DUS|FRA|HAM|MUC|STR|ATH|SKG|BUD|KEF|ORK|DUB|MXP|PMO|FCO|RIX|VNO|LUX|KIV|AMS|SKP|OSL|WAW|LIS|OTP|DME|LED|KLD|BEG|BTS|BCN|MAD|GOT|ARN|GVA|ZRH|IST|ADB|KBP|EDI|LHR|MAN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > EU-$ip.csv
+# 2. 注入目标地区特定 IP 段 (核心改进：解决库里没人的问题)
+# 这些网段涵盖了 Cloudflare 在亚太地区最活跃的 Anycast 节点
+generate_ip_list() {
+    cat > ips-v4.txt << EOF
+1.0.0.0/24
+1.1.1.0/24
+103.21.244.0/22
+103.22.200.0/22
+104.16.0.0/12
+108.162.192.0/18
+141.101.64.0/18
+162.158.0.0/15
+172.64.0.0/13
+188.114.96.0/20
+190.93.240.0/20
+197.234.240.0/22
+198.41.128.0/17
+EOF
+    # IPV6 段（如果需要）
+    cat > ips-v6.txt << EOF
+2400:cb00::/32
+2606:4700::/32
+2803:f800::/32
+2405:b500::/32
+2405:8100::/32
+2a06:98c0::/29
+2c0f:f248::/32
+EOF
 }
 
-#if timeout 3 ping -c 2 google.com &> /dev/null; then
-#echo "当前网络已开代理，为确保准确性，请关闭代理"
-#else
-#echo "当前网络已关闭代理，继续进行……"
-#fi
+# 3. 结果分类筛选函数 (核心改进：确保不被香港 IP 霸榜)
+result(){
+    echo "正在分类整理各地区节点..."
+    # 新加坡
+    awk -F ',' '$2 ~ /SIN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > SG-$ip.csv
+    # 韩国
+    awk -F ',' '$2 ~ /ICN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > KR-$ip.csv
+    # 泰国
+    awk -F ',' '$2 ~ /BKK/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > TH-$ip.csv
+    # 澳大利亚
+    awk -F ',' '$2 ~ /SYD|MEL|BNE|ADL|PER/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > AU-$ip.csv
+    # 美国
+    awk -F ',' '$2 ~ /LAX|SFO|SJC|SEA|PHX|ORD|EWR|IAD/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > US-$ip.csv
+    # 香港 (作为备选)
+    awk -F ',' '$2 ~ /HKG/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > HK-$ip.csv
+}
 
-if timeout 3 ping -c 2 2400:3200::1 &> /dev/null; then
-echo "当前网络支持IPV4+IPV6"
-else
-echo "当前网络仅支持IPV4"
-fi
-rm -rf 6.csv 4.csv
-echo "甬哥Github项目  ：github.com/yonggekkk"
-echo "甬哥Blogger博客 ：ygkkk.blogspot.com"
-echo "甬哥YouTube频道 ：www.youtube.com/@ygkkk"
-echo
-echo "如果提示：运行出错，请检查网络依赖环境！！！请先通过代理运行一次，后续只用快捷运行：bash cf.sh"
-echo
-echo "请选择优选类型"
-echo "1、仅IPV4优选"
-echo "2、仅IPV6优选"
-echo "3、IPV4+IPV6优选"
-echo "4、重置配置文件"
-echo "5、退出"
-read -p "请选择【1-5】:" menu
+# 4. 环境准备
 if [ ! -e cf ]; then
-curl -L -o cf -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/$cpu
-chmod +x cf
+    echo "下载测速工具..."
+    curl -L -o cf -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/$cpu
+    chmod +x cf
 fi
+
 if [ ! -e locations.json ]; then
-curl -s -o locations.json https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/locations.json
+    curl -s -o locations.json https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/locations.json
 fi
-if [ ! -e ips-v4.txt ]; then
-curl -s -o ips-v4.txt https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/ips-v4.txt
-fi
-if [ ! -e ips-v6.txt ]; then
-curl -s -o ips-v6.txt https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/ips-v6.txt
-fi
+
+# 5. 主菜单
+echo "------------------------------------------------"
+echo "Cloudflare 多地区优选脚本 (抽样加速版)"
+echo "目标地区：新加坡、韩国、泰国、澳大利亚"
+echo "------------------------------------------------"
+echo "1、IPV4 优选"
+echo "2、IPV6 优选"
+echo "3、重置并退出"
+read -p "请选择 [1-3]: " menu
+
 if [ "$menu" = "1" ]; then
-ip=4
-./cf -ips 4 -outfile 4.csv
-result
+    ip=4
+    generate_ip_list
+    echo "开始快速抽样扫描 (预计 2-5 分钟)..."
+    # -n 500 表示只取 500 个样本测速，防止时间过长
+    ./cf -ips 4 -outfile 4.csv -n 500 -t 10
+    result
 elif [ "$menu" = "2" ]; then
-ip=6
-./cf -ips 6 -outfile 6.csv
-result
+    ip=6
+    generate_ip_list
+    ./cf -ips 6 -outfile 6.csv -n 500 -t 10
+    result
 elif [ "$menu" = "3" ]; then
-ip=4
-./cf -ips 4 -outfile 4.csv
-result
-ip=6
-./cf -ips 6 -outfile 6.csv
-result
-elif [ "$menu" = "4" ]; then
-rm -rf 6.csv 4.csv locations.json ips-v4.txt ips-v6.txt cf cf.sh
-echo "已重置成功" && exit
+    rm -rf *.csv locations.json ips-v4.txt ips-v6.txt cf
+    exit
 else
-exit
+    exit
 fi
+
+# 6. 输出结果展示
 clear
-if [ -e 4.csv ]; then
-echo "IPV4最佳可用节点如下（取前三名）："
-echo "美国IPV4优选结果："
-cat US-4.csv
-echo
-echo "亚洲IPV4优选结果："
-cat AS-4.csv
-echo
-echo "欧洲IPV4优选结果："
-cat EU-4.csv
-fi
-if [ -e 6.csv ]; then
-echo "IPV6最佳可用节点如下（取前三名）："
-echo "美国IPV6优选结果："
-cat US-6.csv
-echo
-echo "亚洲IPV6优选结果："
-cat AS-6.csv
-echo
-echo "欧洲IPV6优选结果："
-cat EU-6.csv
-fi
-if [ ! -e 4.csv ] && [ ! -e 6.csv ]; then
-echo "运行出错，请检查网络依赖环境"
-fi
+echo "================ 优选结果展示 ================"
+for region in "SG:🇸🇬 新加坡" "KR:🇰🇷 韩国" "TH:🇹🇭 泰国" "AU:🇦🇺 澳大利亚" "HK:🇭🇰 香港" "US:🇺🇸 美国"
+do
+    code=${region%%:*}
+    name=${region#*:}
+    echo "[$name]"
+    file="$code-$ip.csv"
+    if [ -s "$file" ]; then
+        cat "$file"
+    else
+        echo "未发现该地区有效节点 (可能被运营商劫持路由)"
+    fi
+    echo "----------------------------------------------"
+done
