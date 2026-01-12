@@ -1,91 +1,124 @@
 #!/bin/bash
 export LANG=en_US.UTF-8
+case "$(uname -m)" in
+	x86_64 | x64 | amd64 )
+	cpu=amd64
+	;;
+	i386 | i686 )
+        cpu=386
+	;;
+	armv8 | armv8l | arm64 | aarch64 )
+        cpu=arm64
+	;;
+	armv7l )
+        cpu=arm
+	;;
+        mips64le )
+        cpu=mips64le
+	;;
+        mips64 )
+        cpu=mips64
+	;;
+        mips )
+        cpu=mipsle
+	;;
+        mipsle )
+        cpu=mipsle
+	;;
+	* )
+	echo "当前架构为$(uname -m)，暂不支持"
+	exit
+	;;
+esac
 
-# 1. 生成移动专供 IP 库 (包含 IPv4 冷门段和 IPv6 亚太全量段)
-generate_ip_lists() {
-    # IPv4：加入了一些容易跳出非香港节点的冷门 CMI 网段
-    cat > ips-v4.txt << EOF
-1.0.0.0/24
-188.114.96.0/20
-141.101.64.0/18
-104.16.0.0/13
-172.64.0.0/13
-103.21.244.0/22
-190.93.240.0/20
-EOF
-
-    # IPv6：移动线路在 IPv6 下极易直连新加坡、日本和韩国
-    cat > ips-v6.txt << EOF
-2400:cb00::/32
-2606:4700::/32
-2405:b500::/32
-2405:8100::/32
-2a06:98c0::/29
-2c0f:f248::/32
-EOF
-}
-
-# 2. 深度分类函数 (针对你要求的四个地区 + 香港/美国)
 result(){
-    # 定义分类列表：新加坡、韩国(含日本)、泰国、澳大利亚、美国、香港
-    echo "正在对 $1 结果进行深度分类..."
-    awk -F ',' '$2 ~ /SIN/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > SG-$1.csv
-    awk -F ',' '$2 ~ /ICN|NRT|HND|KIX/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > KRJP-$1.csv
-    awk -F ',' '$2 ~ /BKK/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > TH-$1.csv
-    awk -F ',' '$2 ~ /SYD|MEL|BNE|ADL|PER/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > AU-$1.csv
-    awk -F ',' '$2 ~ /HKG/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > HK-$1.csv
-    awk -F ',' '$2 ~ /LAX|SFO|SJC|SEA|ORD|EWR|IAD/ {print $0}' $1.csv | sort -t ',' -k5,5n | head -n 3 > US-$1.csv
+awk -F ',' '$2 ~ /BGI|YCC|YVR|YWG|YHZ|YOW|YYZ|YUL|YXE|STI|SDQ|GUA|KIN|GDL|MEX|QRO|SJU|MGM|ANC|PHX|LAX|SMF|SAN|SFO|SJC|DEN|JAX|MIA|TLH|TPA|ATL|HNL|ORD|IND|BGR|BOS|DTW|MSP|MCI|STL|OMA|LAS|EWR|ABQ|BUF|CLT|RDU|CLE|CMH|OKC|PDX|PHL|PIT|FSD|MEM|BNA|AUS|DFW|IAH|MFE|SAT|SLC|IAD|ORF|RIC|SEA/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > US-$ip.csv
+awk -F ',' '$2 ~ /CGP|DAC|JSR|PBH|BWN|PNH|GUM|HKG|AMD|BLR|BBI|IXC|MAA|HYD|CNN|KNU|COK|CCU|BOM|NAG|DEL|PAT|DPS|CGK|JOG|FUK|OKA|KIX|NRT|ALA|NQZ|ICN|VTE|MFM|JHB|KUL|KCH|MLE|ULN|MDL|RGN|KTM|ISB|KHI|LHE|CGY|CEB|MNL|CRK|KJA|SVX|SIN|CMB|KHH|TPE|BKK|CNX|URT|TAS|DAD|HAN|SGN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > AS-$ip.csv
+awk -F ',' '$2 ~ /TIA|VIE|MSQ|BRU|SOF|ZAG|LCA|PRG|CPH|TLL|HEL|BOD|LYS|MRS|CDG|TBS|TXL|DUS|FRA|HAM|MUC|STR|ATH|SKG|BUD|KEF|ORK|DUB|MXP|PMO|FCO|RIX|VNO|LUX|KIV|AMS|SKP|OSL|WAW|LIS|OTP|DME|LED|KLD|BEG|BTS|BCN|MAD|GOT|ARN|GVA|ZRH|IST|ADB|KBP|EDI|LHR|MAN/ {print $0}' $ip.csv | sort -t ',' -k5,5n | head -n 3 > EU-$ip.csv
 }
 
-# 3. 结果展示函数
-show_result() {
-    type=$1
-    echo "================ $type 优选结果汇总 ================"
-    for region in "SG:🇸🇬 新加坡" "KRJP:🇰🇷🇯🇵 韩日" "TH:🇹🇭 泰国" "AU:🇦🇺 澳大利亚" "HK:🇭🇰 香港" "US:🇺🇸 美国"
-    do
-        code=${region%%:*}
-        name=${region#*:}
-        file="$code-$type.csv"
-        echo "[$name]"
-        if [ -s "$file" ]; then
-            cat "$file"
-        else
-            echo "未发现直连节点 (此线路该地区可能绕路)"
-        fi
-        echo "------------------------------------------------"
-    done
-}
+#if timeout 3 ping -c 2 google.com &> /dev/null; then
+#echo "当前网络已开代理，为确保准确性，请关闭代理"
+#else
+#echo "当前网络已关闭代理，继续进行……"
+#fi
 
-# 4. 主程序执行逻辑
-clear
-echo "正在检测环境..."
-generate_ip_lists
-
-# 探测 IPv6 是否可用
-if ping6 -c 1 2400:3200::1 &> /dev/null; then
-    ipv6_ready=true
-    echo "检测到 IPv6 环境可用。"
+if timeout 3 ping -c 2 2400:3200::1 &> /dev/null; then
+echo "当前网络支持IPV4+IPV6"
 else
-    ipv6_ready=false
-    echo "未检测到 IPv6 环境，将仅优选 IPv4。"
+echo "当前网络仅支持IPV4"
 fi
-
-# 开始优选 IPv4
-echo "正在优选 IPv4 (样本量 800)..."
-./cf -ips 4 -outfile 4.csv -n 800 -task 100
-result 4
-
-# 如果有 IPv6，开始优选 IPv6
-if [ "$ipv6_ready" = true ]; then
-    echo "正在优选 IPv6 (样本量 800)..."
-    ./cf -ips 6 -outfile 6.csv -n 800 -task 100
-    result 6
+rm -rf 6.csv 4.csv
+echo "甬哥Github项目  ：github.com/yonggekkk"
+echo "甬哥Blogger博客 ：ygkkk.blogspot.com"
+echo "甬哥YouTube频道 ：www.youtube.com/@ygkkk"
+echo
+echo "如果提示：运行出错，请检查网络依赖环境！！！请先通过代理运行一次，后续只用快捷运行：bash cf.sh"
+echo
+echo "请选择优选类型"
+echo "1、仅IPV4优选"
+echo "2、仅IPV6优选"
+echo "3、IPV4+IPV6优选"
+echo "4、重置配置文件"
+echo "5、退出"
+read -p "请选择【1-5】:" menu
+if [ ! -e cf ]; then
+curl -L -o cf -# --retry 2 --insecure https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/$cpu
+chmod +x cf
 fi
-
-# 5. 打印最终报告
+if [ ! -e locations.json ]; then
+curl -s -o locations.json https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/locations.json
+fi
+if [ ! -e ips-v4.txt ]; then
+curl -s -o ips-v4.txt https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/ips-v4.txt
+fi
+if [ ! -e ips-v6.txt ]; then
+curl -s -o ips-v6.txt https://raw.githubusercontent.com/yonggekkk/Cloudflare_vless_trojan/main/cf/ips-v6.txt
+fi
+if [ "$menu" = "1" ]; then
+ip=4
+./cf -ips 4 -outfile 4.csv
+result
+elif [ "$menu" = "2" ]; then
+ip=6
+./cf -ips 6 -outfile 6.csv
+result
+elif [ "$menu" = "3" ]; then
+ip=4
+./cf -ips 4 -outfile 4.csv
+result
+ip=6
+./cf -ips 6 -outfile 6.csv
+result
+elif [ "$menu" = "4" ]; then
+rm -rf 6.csv 4.csv locations.json ips-v4.txt ips-v6.txt cf cf.sh
+echo "已重置成功" && exit
+else
+exit
+fi
 clear
-show_result 4
-if [ "$ipv6_ready" = true ]; then
-    show_result 6
+if [ -e 4.csv ]; then
+echo "IPV4最佳可用节点如下（取前三名）："
+echo "美国IPV4优选结果："
+cat US-4.csv
+echo
+echo "亚洲IPV4优选结果："
+cat AS-4.csv
+echo
+echo "欧洲IPV4优选结果："
+cat EU-4.csv
 fi
-
+if [ -e 6.csv ]; then
+echo "IPV6最佳可用节点如下（取前三名）："
+echo "美国IPV6优选结果："
+cat US-6.csv
+echo
+echo "亚洲IPV6优选结果："
+cat AS-6.csv
+echo
+echo "欧洲IPV6优选结果："
+cat EU-6.csv
+fi
+if [ ! -e 4.csv ] && [ ! -e 6.csv ]; then
+echo "运行出错，请检查网络依赖环境"
+fi
